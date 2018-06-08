@@ -1,18 +1,10 @@
-{-# language DataKinds                 #-}
-{-# language DeriveFunctor             #-}
-{-# language ExistentialQuantification #-}
-{-# language FlexibleContexts          #-}
-{-# language FlexibleInstances         #-}
-{-# language KindSignatures            #-}
-{-# language LambdaCase                #-}
-{-# language MultiParamTypeClasses     #-}
-{-# language StandaloneDeriving        #-}
-{-# language TypeFamilies              #-}
-{-# language TypeOperators             #-}
-{-# language UndecidableInstances      #-}
+{-# language DeriveFunctor         #-}
+{-# language FlexibleContexts      #-}
+{-# language FlexibleInstances     #-}
+{-# language LambdaCase            #-}
+{-# language MultiParamTypeClasses #-}
+{-# language TypeOperators         #-}
 module Main where
-
-import Data.Void
 
 data Expr f = In (f (Expr f))
 
@@ -206,53 +198,6 @@ instance (Run f, Run g) => Run (f :+: g) where
 run :: Run f => Term f a -> Mem -> (a, Mem)
 run = foldTerm (,) runAlgebra
 
-
--- http://reasonablypolymorphic.com/blog/better-data-types-a-la-carte/
-
-class Summable (fs :: [* -> *]) where
-  data Summed fs :: * -> *
-
-instance Summable '[] where
-  data Summed '[] a = SummedNil Void
-    deriving Functor
-
-instance Summable (f ': fs) where
-  data Summed (f ': fs) a
-    = Functor f => Here (f a)
-    | Elsewhere (Summed fs a)
-
-deriving instance Functor (Summed fs) => Functor (Summed (f ': fs))
-
-class Injectable (f :: * -> *) (fs :: [* -> *]) where
-  inj' :: f a -> Summed fs a
-
-instance Functor f => Injectable f (f ': fs) where
-  inj' = Here
-
-instance {-# OVERLAPPABLE #-} Injectable f fs => Injectable f (g ': fs) where
-  inj' = Elsewhere . inj'
-
-class Projectable (f :: * -> *) (fs :: [* -> *]) where
-  prj' :: Summed fs a -> Maybe (f a)
-
-instance Projectable f (f ': fs) where
-  prj' (Here fa)     = Just fa
-  prj' (Elsewhere _) = Nothing
-
-instance {-# OVERLAPPABLE #-} Projectable f fs => Projectable f (g ': fs) where
-  prj' (Here _)       = Nothing
-  prj' (Elsewhere fa) = prj' fa
-
-class ( Summable fs
-      , Injectable f fs
-      , Projectable f fs
-      , Functor (Summed fs)
-      ) => (f :: * -> *) :<<: (fs :: [* -> *])
-instance ( Summable fs
-         , Injectable f fs
-         , Projectable f fs
-         , Functor (Summed fs)
-         ) => (f :<<: fs)
 
 
 -- inject'
