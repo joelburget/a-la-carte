@@ -101,10 +101,6 @@ distrIt expr = do
   print $ pretty <$> distr expr
   putStrLn "\n"
 
-data Zero a              deriving Functor
-data One a = One         deriving Functor
-data Const e a = Const e deriving Functor
-
 data Incr t = Incr Int t
   deriving Functor
 
