@@ -6,6 +6,7 @@
 {-# language TypeOperators         #-}
 module Main where
 
+import Control.Monad.Free
 import Data.Functor.Sum
 
 data Expr f = In (f (Expr f))
@@ -125,24 +126,6 @@ distrIt expr = do
   print $ pretty <$> distr expr
   putStrLn "\n"
 
-data Term f a
-  = Pure a
-  | Impure (f (Term f a))
-  deriving (Functor)
-
-instance Functor f => Applicative (Term f) where
-  pure = Pure
-
-  m1 <*> m2 = do
-    x1 <- m1
-    x2 <- m2
-    pure (x1 x2)
-
-instance Functor f => Monad (Term f) where
-  return = Pure
-  Pure x   >>= f = f x
-  Impure t >>= f = Impure (fmap (>>= f) t)
-
 data Zero a              deriving Functor
 data One a = One         deriving Functor
 data Const e a = Const e deriving Functor
@@ -155,27 +138,27 @@ data Recall t = Recall (Int -> t)
 
 data Clear t = Clear
 
-inject' :: (g :<: f) => g (Term f a) -> Term f a
-inject' = Impure . inj
+inject' :: (g :<: f) => g (Free f a) -> Free f a
+inject' = Free . inj
 
-incr :: (Incr :<: f) => Int -> Term f ()
+incr :: (Incr :<: f) => Int -> Free f ()
 incr i = inject' (Incr i (Pure ()))
 
-recall :: (Recall :<: f) => Term f Int
+recall :: (Recall :<: f) => Free f Int
 recall = inject' (Recall Pure)
 
-tick :: Term (Recall :+: Incr) Int
+tick :: Free (Recall :+: Incr) Int
 tick = do
   y <- recall
   incr 1
   return y
 
-clear :: (Clear :<: f) => Term f ()
+clear :: (Clear :<: f) => Free f ()
 clear = inject' Clear
 
-foldTerm :: Functor f => (a -> b) -> (f b -> b) -> Term f a -> b
+foldTerm :: Functor f => (a -> b) -> (f b -> b) -> Free f a -> b
 foldTerm pure' _imp (Pure x) = pure' x
-foldTerm pure' imp (Impure t) = imp (fmap (foldTerm pure' imp) t)
+foldTerm pure' imp (Free t) = imp (fmap (foldTerm pure' imp) t)
 
 newtype Mem = Mem Int
   deriving Show
@@ -193,7 +176,7 @@ instance (Run f, Run g) => Run (f :+: g) where
   runAlgebra (InL f) = runAlgebra f
   runAlgebra (InR g) = runAlgebra g
 
-run :: Run f => Term f a -> Mem -> (a, Mem)
+run :: Run f => Free f a -> Mem -> (a, Mem)
 run = foldTerm (,) runAlgebra
 
 
@@ -218,5 +201,5 @@ main = do
     in x
 
   print $ run tick (Mem 4)
-  print $ run (incr 1 :: Term Incr ()) (Mem 8)
-  print $ run (incr 1 :: Term Incr ()) (Mem 10)
+  print $ run (incr 1 :: Free Incr ()) (Mem 8)
+  print $ run (incr 1 :: Free Incr ()) (Mem 10)
