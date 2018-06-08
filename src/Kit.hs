@@ -43,8 +43,13 @@ instance {-# OVERLAPPABLE #-} (Functor f, Functor g) => f :<: (f :+: g) where
 instance {-# OVERLAPS #-} (Functor f, Functor g, Functor h, f :<: g) => f :<: (h :+: g) where
   inj = _InR . inj
 
+-- Natural transformation from @f@ to @g@
 type f ~> g = forall a. f a -> g a
 infixr 4 ~>
+
+-- Natural transformation from @f@ to @Free g@
+type f ~< g = f ~> Free g
+infixr 4 ~<
 
 inject :: (f :<: g) => f ~> g
 inject = review inj
@@ -53,9 +58,6 @@ inject = review inj
 injectFix :: (f :<: g) => f (Fix g) -> Fix g
 injectFix = Fix . inject
 
-type f ~< g = f ~> Free g
-infixr 4 ~<
-
 -- also called @inject@ in DTalC
 injectFree :: (g :<: f) => g (Free f a) -> Free f a
 injectFree = Free . inject
@@ -63,3 +65,7 @@ injectFree = Free . inject
 -- Creates a Free program from the provided injectable instruction
 instruction :: (f :<: g) => f ~< g
 instruction = liftF . inject
+
+foldTerm :: Functor f => (a -> b) -> (f b -> b) -> Free f a -> b
+foldTerm pure' _imp (Pure x) = pure' x
+foldTerm pure' imp (Free t)  = imp (fmap (foldTerm pure' imp) t)

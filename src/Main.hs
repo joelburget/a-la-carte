@@ -17,11 +17,12 @@ import Kit
 
 data Val e = Val Int
   deriving Functor
-type IntExpr = Fix Val
 
 data Add e = Add e e
   deriving Functor
-type AddExpr = Fix Add
+
+data Mul x = Mul x x
+  deriving Functor
 
 val :: (Val :<: f) => Int -> Fix f
 val x = injectFix (Val x)
@@ -30,53 +31,9 @@ infixl 6 .+
 (.+) :: (Add :<: f) => Fix f -> Fix f -> Fix f
 x .+ y = injectFix (Add x y)
 
-addExample :: Fix (Val :+: Add)
-addExample = val 118 .+ val 1219
-
-class Functor f => Eval f where
-  evalAlgebra :: f Int -> Int
-
-instance Eval Val where
-  evalAlgebra (Val i) = i
-
-instance Eval Add where
-  evalAlgebra (Add x y) = x + y
-
-instance (Eval f, Eval g) => Eval (f :+: g) where
-  evalAlgebra (InL x) = evalAlgebra x
-  evalAlgebra (InR y) = evalAlgebra y
-
-eval :: Eval f => Fix f -> Int
-eval expr = foldExpr evalAlgebra expr
-
-data Mul x = Mul x x
-  deriving Functor
-
-instance Eval Mul where
-  evalAlgebra (Mul x y) = x * y
-
 infixl 7 .*
 (.*) :: (Mul :<: f) => Fix f -> Fix f -> Fix f
 x .* y = injectFix (Mul x y)
-
-class Render f where
-  render :: Render g => f (Fix g) -> String
-
-pretty :: Render f => Fix f -> String
-pretty (Fix t) = render t
-
-instance Render Val where
-  render (Val i) = show i
-
-instance Render Add where
-  render (Add x y) = "(" ++ pretty x ++ " + " ++ pretty y ++ ")"
-
-instance Render Mul where
-  render (Mul x y) = "(" ++ pretty x ++ " * " ++ pretty y ++ ")"
-
-instance (Render f, Render g) => Render (f :+: g) where
-  render (InL x) = render x
-  render (InR y) = render y
 
 match :: (g :<: f) => Fix f -> Maybe (g (Fix f))
 match (Fix t) = preview inj t
@@ -86,20 +43,6 @@ distr t = do
   Mul a b <- match t
   Add c d <- match b
   pure (a .* c .+ a .* d)
-
-showIt :: (Render f, Eval f) => Fix f -> IO ()
-showIt expr = do
-  putStrLn (pretty expr)
-  putStrLn "-->"
-  print (eval expr)
-  putStrLn "\n"
-
-distrIt :: (Render f, Eval f, Add :<: f, Mul :<: f) => Fix f -> IO ()
-distrIt expr = do
-  putStrLn (pretty expr)
-  putStrLn "==>"
-  print $ pretty <$> distr expr
-  putStrLn "\n"
 
 data Incr t = Incr Int t
   deriving Functor
@@ -124,12 +67,9 @@ tick = do
 clear :: (Clear :<: f) => Free f ()
 clear = injectFree Clear
 
-foldTerm :: Functor f => (a -> b) -> (f b -> b) -> Free f a -> b
-foldTerm pure' _imp (Pure x) = pure' x
-foldTerm pure' imp (Free t) = imp (fmap (foldTerm pure' imp) t)
-
 newtype Mem = Mem Int
   deriving Show
+
 
 class Functor f => Run f where
   runAlgebra :: f (Mem -> (a, Mem)) -> (Mem -> (a, Mem))
@@ -148,14 +88,72 @@ run :: Run f => Free f a -> Mem -> (a, Mem)
 run = foldTerm (,) runAlgebra
 
 
+class Functor f => Eval f where
+  evalAlgebra :: f Int -> Int
+
+instance Eval Val where
+  evalAlgebra (Val i) = i
+
+instance Eval Add where
+  evalAlgebra (Add x y) = x + y
+
+instance Eval Mul where
+  evalAlgebra (Mul x y) = x * y
+
+instance (Eval f, Eval g) => Eval (f :+: g) where
+  evalAlgebra (InL x) = evalAlgebra x
+  evalAlgebra (InR y) = evalAlgebra y
+
+eval :: Eval f => Fix f -> Int
+eval expr = foldExpr evalAlgebra expr
+
+
+class Render f where
+  render :: Render g => f (Fix g) -> String
+
+instance Render Val where
+  render (Val i) = show i
+
+instance Render Add where
+  render (Add x y) = "(" ++ pretty x ++ " + " ++ pretty y ++ ")"
+
+instance Render Mul where
+  render (Mul x y) = "(" ++ pretty x ++ " * " ++ pretty y ++ ")"
+
+instance (Render f, Render g) => Render (f :+: g) where
+  render (InL x) = render x
+  render (InR y) = render y
+
+pretty :: Render f => Fix f -> String
+pretty (Fix t) = render t
+
 
 main :: IO ()
 main = do
+
+  let showIt :: (Render f, Eval f) => Fix f -> IO ()
+      showIt expr = do
+        putStrLn (pretty expr)
+        putStrLn "-->"
+        print (eval expr)
+        putStrLn "\n"
+
+      distrIt :: (Render f, Eval f, Add :<: f, Mul :<: f) => Fix f -> IO ()
+      distrIt expr = do
+        putStrLn (pretty expr)
+        putStrLn "==>"
+        print $ pretty <$> distr expr
+        putStrLn "\n"
+
+      addExample :: Fix (Val :+: Add)
+      addExample = val 118 .+ val 1219
+
   showIt addExample
   showIt $
     let x :: Fix (Add :+: Val)
         x = val 30000 .+ val 1330 .+ val 7
     in x
+
   showIt $
     let x :: Fix (Val :+: Add :+: Mul)
         x = val 80 .* val 5 .+ val 4
