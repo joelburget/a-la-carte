@@ -7,23 +7,22 @@
 module Main where
 
 import Control.Monad.Free
+import Data.Functor.Foldable
 import Data.Functor.Sum
-
-data Expr f = In (f (Expr f))
 
 data Val e = Val Int
   deriving Functor
-type IntExpr = Expr Val
+type IntExpr = Fix Val
 
 data Add e = Add e e
   deriving Functor
-type AddExpr = Expr Add
+type AddExpr = Fix Add
 
 infixr :+:
 type (:+:) = Sum
 
-foldExpr :: Functor f => (f a -> a) -> Expr f -> a
-foldExpr f (In t) = f (fmap (foldExpr f) t)
+foldExpr :: Functor f => (f a -> a) -> Fix f -> a
+foldExpr f (Fix t) = f (fmap (foldExpr f) t)
 
 class Functor f => Eval f where
   evalAlgebra :: f Int -> Int
@@ -38,7 +37,7 @@ instance (Eval f, Eval g) => Eval (f :+: g) where
   evalAlgebra (InL x) = evalAlgebra x
   evalAlgebra (InR y) = evalAlgebra y
 
-eval :: Eval f => Expr f -> Int
+eval :: Eval f => Fix f -> Int
 eval expr = foldExpr evalAlgebra expr
 
 class (Functor sub, Functor sup) => sub :<: sup where
@@ -61,18 +60,18 @@ instance {-# OVERLAPS #-} (Functor f, Functor g, Functor h, f :<: g) => f :<: (h
     InL _ -> Nothing
     InR x -> prj x
 
-inject :: (g :<: f) => g (Expr f) -> Expr f
-inject = In . inj
+inject :: (g :<: f) => g (Fix f) -> Fix f
+inject = Fix . inj
 
-val :: (Val :<: f) => Int -> Expr f
+val :: (Val :<: f) => Int -> Fix f
 val x = inject (Val x)
 
 infixl 6 .+
-(.+) :: (Add :<: f) => Expr f -> Expr f -> Expr f
+(.+) :: (Add :<: f) => Fix f -> Fix f -> Fix f
 x .+ y = inject (Add x y)
 
-addExample :: Expr (Val :+: Add)
-addExample = In (InR (Add (In (InL (Val 118))) (In (InL (Val 1219)))))
+addExample :: Fix (Val :+: Add)
+addExample = Fix (InR (Add (Fix (InL (Val 118))) (Fix (InL (Val 1219)))))
 
 data Mul x = Mul x x
   deriving Functor
@@ -81,14 +80,14 @@ instance Eval Mul where
   evalAlgebra (Mul x y) = x * y
 
 infixl 7 .*
-(.*) :: (Mul :<: f) => Expr f -> Expr f -> Expr f
+(.*) :: (Mul :<: f) => Fix f -> Fix f -> Fix f
 x .* y = inject (Mul x y)
 
 class Render f where
-  render :: Render g => f (Expr g) -> String
+  render :: Render g => f (Fix g) -> String
 
-pretty :: Render f => Expr f -> String
-pretty (In t) = render t
+pretty :: Render f => Fix f -> String
+pretty (Fix t) = render t
 
 instance Render Val where
   render (Val i) = show i
@@ -103,23 +102,23 @@ instance (Render f, Render g) => Render (f :+: g) where
   render (InL x) = render x
   render (InR y) = render y
 
-match :: (g :<: f) => Expr f -> Maybe (g (Expr f))
-match (In t) = prj t
+match :: (g :<: f) => Fix f -> Maybe (g (Fix f))
+match (Fix t) = prj t
 
-distr :: (Add :<: f, Mul :<: f) => Expr f -> Maybe (Expr f)
+distr :: (Add :<: f, Mul :<: f) => Fix f -> Maybe (Fix f)
 distr t = do
   Mul a b <- match t
   Add c d <- match b
   pure (a .* c .+ a .* d)
 
-showIt :: (Render f, Eval f) => Expr f -> IO ()
+showIt :: (Render f, Eval f) => Fix f -> IO ()
 showIt expr = do
   putStrLn (pretty expr)
   putStrLn "-->"
   print (eval expr)
   putStrLn "\n"
 
-distrIt :: (Render f, Eval f, Add :<: f, Mul :<: f) => Expr f -> IO ()
+distrIt :: (Render f, Eval f, Add :<: f, Mul :<: f) => Fix f -> IO ()
 distrIt expr = do
   putStrLn (pretty expr)
   putStrLn "==>"
@@ -187,16 +186,16 @@ main :: IO ()
 main = do
   showIt addExample
   showIt $
-    let x :: Expr (Add :+: Val)
+    let x :: Fix (Add :+: Val)
         x = val 30000 .+ val 1330 .+ val 7
     in x
   showIt $
-    let x :: Expr (Val :+: Add :+: Mul)
+    let x :: Fix (Val :+: Add :+: Mul)
         x = val 80 .* val 5 .+ val 4
     in x
 
   distrIt $
-    let x :: Expr (Val :+: Add :+: Mul)
+    let x :: Fix (Val :+: Add :+: Mul)
         x = val 80 .* (val 5 .+ val 4)
     in x
 
