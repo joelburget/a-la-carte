@@ -3,6 +3,7 @@
 {-# language FlexibleInstances     #-}
 {-# language LambdaCase            #-}
 {-# language MultiParamTypeClasses #-}
+{-# language PatternSynonyms       #-}
 {-# language Rank2Types            #-}
 {-# language TypeOperators         #-}
 module Main where
@@ -12,6 +13,8 @@ import Control.Monad.Free
 import Data.Functor.Foldable
 import Data.Functor.Sum
 
+import Kit
+
 data Val e = Val Int
   deriving Functor
 type IntExpr = Fix Val
@@ -20,21 +23,15 @@ data Add e = Add e e
   deriving Functor
 type AddExpr = Fix Add
 
-infixr :+:
-type (:+:) = Sum
+val :: (Val :<: f) => Int -> Fix f
+val x = injectFix (Val x)
 
-_InL :: Prism' (Sum f g a) (f a)
-_InL = prism' InL $ \case
-  InL x -> Just x
-  InR _ -> Nothing
+infixl 6 .+
+(.+) :: (Add :<: f) => Fix f -> Fix f -> Fix f
+x .+ y = injectFix (Add x y)
 
-_InR :: Prism' (Sum f g a) (g a)
-_InR = prism' InR $ \case
-  InL _ -> Nothing
-  InR x -> Just x
-
-foldExpr :: Functor f => (f a -> a) -> Fix f -> a
-foldExpr f (Fix t) = f (fmap (foldExpr f) t)
+addExample :: Fix (Val :+: Add)
+addExample = val 118 .+ val 1219
 
 class Functor f => Eval f where
   evalAlgebra :: f Int -> Int
@@ -51,40 +48,6 @@ instance (Eval f, Eval g) => Eval (f :+: g) where
 
 eval :: Eval f => Fix f -> Int
 eval expr = foldExpr evalAlgebra expr
-
-type Injection sup sub = forall a. Prism' (sup a) (sub a)
-
-class (Functor sub, Functor sup) => sub :<: sup where
-  inj :: Injection sup sub
-
-instance Functor f => f :<: f where
-  inj = id
-
-instance {-# OVERLAPPABLE #-} (Functor f, Functor g) => f :<: (f :+: g) where
-  inj = _InL . inj
-
-instance {-# OVERLAPS #-} (Functor f, Functor g, Functor h, f :<: g) => f :<: (h :+: g) where
-  inj = _InR . inj
-
-type f ~> g = forall a. f a -> g a
-infixr 4 ~>
-
-inject :: (f :<: g) => f ~> g
-inject = review inj
-
--- called @inject@ in DTalC
-injectFix :: (f :<: g) => f (Fix g) -> Fix g
-injectFix = Fix . inject
-
-val :: (Val :<: f) => Int -> Fix f
-val x = injectFix (Val x)
-
-infixl 6 .+
-(.+) :: (Add :<: f) => Fix f -> Fix f -> Fix f
-x .+ y = injectFix (Add x y)
-
-addExample :: Fix (Val :+: Add)
-addExample = Fix (InR (Add (Fix (InL (Val 118))) (Fix (InL (Val 1219)))))
 
 data Mul x = Mul x x
   deriving Functor
@@ -149,17 +112,6 @@ data Recall t = Recall (Int -> t)
   deriving Functor
 
 data Clear t = Clear
-
-type f ~< g = f ~> Free g
-infixr 4 ~<
-
--- also called @inject@ in DTalC
-injectFree :: (g :<: f) => g (Free f a) -> Free f a
-injectFree = Free . inject
-
--- Creates a Free program from the provided injectable instruction
-instruction :: (f :<: g) => f ~< g
-instruction = liftF . inject
 
 incr :: (Incr :<: f) => Int -> Free f ()
 incr i = injectFree (Incr i (Pure ()))
