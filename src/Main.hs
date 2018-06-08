@@ -9,28 +9,16 @@ module Main where
 data Expr f = In (f (Expr f))
 
 data Val e = Val Int
+  deriving Functor
 type IntExpr = Expr Val
 
-instance Functor Val where
-  fmap _ (Val i) = Val i
-
 data Add e = Add e e
+  deriving Functor
 type AddExpr = Expr Add
-
-instance Functor Add where
-  fmap f (Add x y) = Add (f x) (f y)
 
 infixr :+:
 data (f :+: g) e = Inl (f e) | Inr (g e)
-
-instance (Functor f, Functor g) => Functor (f :+: g) where
-  fmap f (Inl x) = Inl (fmap f x)
-  fmap f (Inr y) = Inr (fmap f y)
-
-data (f :*: g) e = f e :*: g e
-
-instance (Functor f, Functor g) => Functor (f :*: g) where
-  fmap f (x :*: y) = fmap f x :*: fmap f y
+  deriving Functor
 
 foldExpr :: Functor f => (f a -> a) -> Expr f -> a
 foldExpr f (In t) = f (fmap (foldExpr f) t)
@@ -85,8 +73,7 @@ addExample :: Expr (Val :+: Add)
 addExample = In (Inr (Add (In (Inl (Val 118))) (In (Inl (Val 1219)))))
 
 data Mul x = Mul x x
-instance Functor Mul where
-  fmap f (Mul x y) = Mul (f x) (f y)
+  deriving Functor
 
 instance Eval Mul where
   evalAlgebra (Mul x y) = x * y
@@ -158,9 +145,9 @@ instance Functor f => Monad (Term f) where
   Pure x   >>= f = f x
   Impure t >>= f = Impure (fmap (>>= f) t)
 
-data Zero a
-data One a = One
-data Const e a = Const e
+data Zero a              deriving Functor
+data One a = One         deriving Functor
+data Const e a = Const e deriving Functor
 
 data Incr t = Incr Int t
   deriving Functor
