@@ -6,6 +6,8 @@
 {-# language TypeOperators         #-}
 module Main where
 
+import Data.Functor.Sum
+
 data Expr f = In (f (Expr f))
 
 data Val e = Val Int
@@ -17,8 +19,7 @@ data Add e = Add e e
 type AddExpr = Expr Add
 
 infixr :+:
-data (f :+: g) e = Inl (f e) | Inr (g e)
-  deriving Functor
+type (:+:) = Sum
 
 foldExpr :: Functor f => (f a -> a) -> Expr f -> a
 foldExpr f (In t) = f (fmap (foldExpr f) t)
@@ -33,8 +34,8 @@ instance Eval Add where
   evalAlgebra (Add x y) = x + y
 
 instance (Eval f, Eval g) => Eval (f :+: g) where
-  evalAlgebra (Inl x) = evalAlgebra x
-  evalAlgebra (Inr y) = evalAlgebra y
+  evalAlgebra (InL x) = evalAlgebra x
+  evalAlgebra (InR y) = evalAlgebra y
 
 eval :: Eval f => Expr f -> Int
 eval expr = foldExpr evalAlgebra expr
@@ -48,16 +49,16 @@ instance Functor f => f :<: f where
   prj = Just
 
 instance {-# OVERLAPPABLE #-} (Functor f, Functor g) => f :<: (f :+: g) where
-  inj = Inl
+  inj = InL
   prj = \case
-    Inl x -> Just x
-    Inr _ -> Nothing
+    InL x -> Just x
+    InR _ -> Nothing
 
 instance {-# OVERLAPS #-} (Functor f, Functor g, Functor h, f :<: g) => f :<: (h :+: g) where
-  inj = Inr . inj
+  inj = InR . inj
   prj = \case
-    Inl _ -> Nothing
-    Inr x -> prj x
+    InL _ -> Nothing
+    InR x -> prj x
 
 inject :: (g :<: f) => g (Expr f) -> Expr f
 inject = In . inj
@@ -70,7 +71,7 @@ infixl 6 .+
 x .+ y = inject (Add x y)
 
 addExample :: Expr (Val :+: Add)
-addExample = In (Inr (Add (In (Inl (Val 118))) (In (Inl (Val 1219)))))
+addExample = In (InR (Add (In (InL (Val 118))) (In (InL (Val 1219)))))
 
 data Mul x = Mul x x
   deriving Functor
@@ -98,8 +99,8 @@ instance Render Mul where
   render (Mul x y) = "(" ++ pretty x ++ " * " ++ pretty y ++ ")"
 
 instance (Render f, Render g) => Render (f :+: g) where
-  render (Inl x) = render x
-  render (Inr y) = render y
+  render (InL x) = render x
+  render (InR y) = render y
 
 match :: (g :<: f) => Expr f -> Maybe (g (Expr f))
 match (In t) = prj t
@@ -127,10 +128,7 @@ distrIt expr = do
 data Term f a
   = Pure a
   | Impure (f (Term f a))
-
-instance Functor f => Functor (Term f) where
-  fmap f (Pure a)    = Pure (f a)
-  fmap f (Impure tm) = Impure (fmap (fmap f) tm)
+  deriving (Functor)
 
 instance Functor f => Applicative (Term f) where
   pure = Pure
@@ -192,8 +190,8 @@ instance Run Recall where
   runAlgebra (Recall r) (Mem i) = r i (Mem i)
 
 instance (Run f, Run g) => Run (f :+: g) where
-  runAlgebra (Inl f) = runAlgebra f
-  runAlgebra (Inr g) = runAlgebra g
+  runAlgebra (InL f) = runAlgebra f
+  runAlgebra (InR g) = runAlgebra g
 
 run :: Run f => Term f a -> Mem -> (a, Mem)
 run = foldTerm (,) runAlgebra
