@@ -1,129 +1,131 @@
 {-# language DeriveFunctor         #-}
 {-# language FlexibleContexts      #-}
 {-# language FlexibleInstances     #-}
+{-# language GADTs                 #-}
+{-# language KindSignatures        #-}
 {-# language LambdaCase            #-}
 {-# language MultiParamTypeClasses #-}
 {-# language PatternSynonyms       #-}
 {-# language Rank2Types            #-}
+{-# language ScopedTypeVariables   #-}
 {-# language TypeOperators         #-}
 {-# language UndecidableInstances  #-}
 module Main where
 
-import Control.Lens
-import Data.Functor.Foldable
-import Data.Functor.Sum
+import Data.Functor.Const
+import Data.Functor.Identity
 
 import Kit
+import HKit
 
-data Val e = Val Int
+data SimpleVal (e :: * -> *) l = SimpleVal l
   deriving Functor
 
-data Arith e
-  = Add e e
-  | Sub e e
-  | Mul e e
-  | Div e e
-  deriving Functor
+instance HFunctor SimpleVal where
+  hmap _ (SimpleVal a) = (SimpleVal a)
 
-instance (Val :<: f, Arith :<: f) => Num (Fix f) where
-  x + y       = injectFix (Add x y)
-  x - y       = injectFix (Sub x y)
-  x * y       = injectFix (Mul x y)
+data Arith (e :: * -> *) l where
+  Add :: e Int -> e Int -> Arith e Int
+  Sub :: e Int -> e Int -> Arith e Int
+  Mul :: e Int -> e Int -> Arith e Int
+  Div :: e Int -> e Int -> Arith e Int
+
+instance HFunctor Arith where
+  hmap trans = \case
+    Add x y -> Add (trans x) (trans y)
+    Sub x y -> Sub (trans x) (trans y)
+    Mul x y -> Mul (trans x) (trans y)
+    Div x y -> Div (trans x) (trans y)
+
+instance (SimpleVal :<: f, Arith :<: f) => Num (Term f Int) where
+  x + y       = inject (Add x y)
+  x - y       = inject (Sub x y)
+  x * y       = inject (Mul x y)
   negate x    = 0 - x
   abs         = undefined
   signum      = undefined
-  fromInteger = injectFix . Val . fromInteger
-
-match :: (g :<: f) => Fix f -> Maybe (g (Fix f))
-match (Fix t) = preview inj t
-
-distr :: (Val :<: f, Arith :<: f) => Fix f -> Maybe (Fix f)
-distr t = do
-  Mul a b <- match t
-  Add c d <- match b
-  pure (a * c + a * d)
-
-data Recall t = Recall (Int -> t)
-  deriving Functor
+  fromInteger = inject . SimpleVal . fromInteger
 
 
-class Functor f => Eval f where
-  evalAlgebra :: f Int -> Int
+class Eval e v where
+  evalAlgebra :: Alg e (Term v)
 
-instance Eval Val where
-  evalAlgebra (Val i) = i
+eval :: (HFunctor e, Eval e v) => Term e ~> Term v
+eval = cata' evalAlgebra
 
-instance Eval Arith where
+-- Not used but potentially useful:
+class EvalI f where
+  evalAlgI :: Alg f Identity
+
+evalI :: (EvalI f, HFunctor f) => Term f t -> t
+evalI = runIdentity . cata' evalAlgI
+
+instance SimpleVal :<: v => Eval SimpleVal v where
+  evalAlgebra = inject
+
+instance (Arith :<: v, SimpleVal :<: v) => Eval Arith v where
   evalAlgebra = \case
     Add x y -> x + y
     Sub x y -> x - y
     Mul x y -> x * y
-    Div x y -> x `div` y
+    Div _x _y -> error "TODO" -- x `div` y
 
-instance (Eval f, Eval g) => Eval (f :+: g) where
+instance (Eval f a, Eval g a) => Eval (f :+: g) a where
   evalAlgebra = \case
-    InL x -> evalAlgebra x
-    InR y -> evalAlgebra y
-
-eval :: Eval f => Fix f -> Int
-eval expr = foldExpr evalAlgebra expr
+    Inl x -> evalAlgebra x
+    Inr y -> evalAlgebra y
 
 
 class Render f where
-  renderPrec :: Render g => Int -> f (Fix g) -> ShowS
+  -- rendersPrec :: Int -> Alg f (Const ShowS)
+  rendersPrec :: Int -> forall a. Show a => f (Const ShowS) a -> Const ShowS a
 
-instance Render Val where
-  renderPrec prec (Val i) = showsPrec prec i
+instance Render SimpleVal where
+  rendersPrec prec (SimpleVal i) = Const (showsPrec prec i)
 
 instance Render Arith where
-  renderPrec prec = showParen (prec > 10) . \case
+  rendersPrec prec = Const . showParen (prec > 10) . \case
     Add x y -> go x . showString " + " . go y
     Sub x y -> go x . showString " - " . go y
     Mul x y -> go x . showString " * " . go y
     Div x y -> go x . showString " / " . go y
-    where go (Fix t) = renderPrec 11 t
+    where go = getConst
 
 instance (Render f, Render g) => Render (f :+: g) where
-  renderPrec prec = showParen (prec > 10) . \case
-    InL x -> renderPrec 11 x
-    InR y -> renderPrec 11 y
+  rendersPrec prec = Const . showParen (prec > 10) . getConst . \case
+    Inl x -> rendersPrec 11 x
+    Inr y -> rendersPrec 11 y
 
-pretty :: Render f => Fix f -> String
-pretty (Fix t) = renderPrec 10 t ""
+pretty :: forall f l. (HFunctor f, Render f, Show l) => Term f l -> String
+pretty t = getConst (cata'' (rendersPrec 10) t) ""
+  where
+  cata'' :: forall g a. (forall b. f g b -> g b) -> Term f a -> g a
+  cata'' f = run
+    where run :: forall b. Term f b -> g b
+          run (Term t) = f (hmap run t)
 
+showIt :: (HFunctor f, Render f) => Term f Int -> IO ()
+showIt expr = do
+  putStrLn (pretty expr)
+  -- putStrLn "-->"
+  -- putStrLn (pretty (eval expr))
+  putStrLn "\n"
 
 main :: IO ()
 main = do
+  putStrLn "here"
 
-  let showIt :: (Render f, Eval f) => Fix f -> IO ()
-      showIt expr = do
-        putStrLn (pretty expr)
-        putStrLn "-->"
-        print (eval expr)
-        putStrLn "\n"
-
-      distrIt :: (Render f, Eval f, Arith :<: f, Val :<: f) => Fix f -> IO ()
-      distrIt expr = do
-        putStrLn (pretty expr)
-        putStrLn "==>"
-        print $ pretty <$> distr expr
-        putStrLn "\n"
-
-      addExample :: Fix (Val :+: Arith)
+  let addExample :: Term (SimpleVal :+: Arith) Int
       addExample = 118 + 1219
 
   showIt addExample
-  showIt $
-    let x :: Fix (Arith :+: Val)
-        x = 30000 + 1330 + 7
-    in x
 
-  showIt $
-    let x :: Fix (Val :+: Arith)
-        x = 80 * 5 + 4
-    in x
+--   showIt $
+--     let x :: Term (Sum Arith SimpleVal) Int
+--         x = 30000 + 1330 + 7
+--     in x
 
-  distrIt $
-    let x :: Fix (Val :+: Arith)
-        x = 80 * (5 + 4)
-    in x
+--   showIt $
+--     let x :: Term (Sum SimpleVal Arith) Int
+--         x = 80 * 5 + 4
+--     in x
